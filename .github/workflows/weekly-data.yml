@@ -1,0 +1,82 @@
+name: Weekly data refresh
+
+# Every Tuesday morning (after Monday's Warcraft Logs harvest on the website),
+# pull the freshly aggregated BuildData.lua from hodguild.com. If it changed,
+# commit it, tag a dated release, and package it — so WoWUp updates every guild
+# member automatically. Also runnable on demand from the Actions tab.
+#
+# This job packages the release itself (rather than relying on the tag-push
+# triggering release.yml) because tags pushed by the built-in GITHUB_TOKEN do
+# not trigger other workflows.
+on:
+  schedule:
+    - cron: "0 12 * * 2" # Tuesdays 12:00 UTC (08:00 ET)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch latest BuildData.lua from the site
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://www.hodguild.com/api/talent-builds/emit" -o BuildData.lua
+
+      - name: Sanity-check the payload
+        run: |
+          set -euo pipefail
+          # Must be real, non-trivial Lua…
+          test "$(wc -c < BuildData.lua)" -gt 100000
+          head -n1 BuildData.lua | grep -q "GENERATED"
+          # …and must carry the talent heatmap. If the website emitter hasn't been
+          # deployed with heat baking yet, abort loudly rather than ship a
+          # regression that strips the in-addon heatmap.
+          grep -q "heat = {" BuildData.lua || {
+            echo "::error::Emit output has no heat data — deploy the website emitter (heat baking) before this can run."
+            exit 1
+          }
+
+      - name: Stop if nothing changed
+        id: diff
+        run: |
+          if git diff --quiet -- BuildData.lua; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "BuildData.lua unchanged — no release needed."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit, tag, and push
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          TAG="v$(date -u +%Y.%m.%d)"
+          # If a tag for today already exists (manual run + auto run), append a suffix.
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            TAG="${TAG}-$(date -u +%H%M)"
+          fi
+          git add BuildData.lua
+          git commit -m "Weekly data refresh ${TAG}"
+          git tag "$TAG"
+          git push origin HEAD:main
+          git push origin "$TAG"
+
+      - name: Package and publish the release
+        if: steps.diff.outputs.changed == 'true'
+        uses: BigWigsMods/packager@v2
+        env:
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
