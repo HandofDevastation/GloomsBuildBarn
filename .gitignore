@@ -1,0 +1,5 @@
+# macOS
+.DS_Store
+
+# BigWigs packager output
+/.release/

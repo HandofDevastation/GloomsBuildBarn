@@ -1,0 +1,21 @@
+## Interface: 120007
+## Title: Gloom's Build Barn
+## Notes: Top talent builds per boss, difficulty, and M+ dungeon — applied in one click. Harvested from Warcraft Logs.
+## Author: Gloom
+## Version: @project-version@
+## SavedVariables: GloomsBuildBarnDB
+## IconTexture: Interface\AddOns\GloomsBuildBarn\Media\minimap.png
+
+# Minimap button libraries (fetched by the packager into Libs/ at release time;
+# absent in local dev, where MinimapButton.lua falls back to a self-contained
+# button). WoW silently skips .toc entries whose files don't exist.
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+
+# Load order matters: the baked data table must exist before Core reads it.
+BuildData.lua
+Core.lua
+UI.lua
+MinimapButton.lua

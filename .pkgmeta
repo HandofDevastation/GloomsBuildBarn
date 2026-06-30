@@ -1,0 +1,22 @@
+# BigWigs packager config. We publish to GitHub Releases ONLY (no CurseForge/Wago).
+# WoWUp installs + auto-updates from those releases via the repo URL.
+
+package-as: GloomsBuildBarn
+
+enable-nolib-creation: no
+
+# Minimap button libraries. The packager fetches these into Libs/ at release
+# build time only — they are NOT committed to the repo (kept clean). Locally
+# (where Libs/ is absent) MinimapButton.lua falls back to a self-contained button.
+externals:
+  Libs/LibStub: https://repos.wowace.com/wow/libstub/trunk
+  Libs/CallbackHandler-1.0: https://repos.wowace.com/wow/callbackhandler/trunk/CallbackHandler-1.0
+  Libs/LibDataBroker-1.1: https://repos.wowace.com/wow/libdatabroker-1-1/trunk
+  Libs/LibDBIcon-1.0: https://repos.wowace.com/wow/libdbicon-1-0/trunk/LibDBIcon-1.0
+
+# Keep repo-management files out of the packaged addon zip.
+ignore:
+  - README.md
+  - .github
+  - .gitignore
+  - .pkgmeta
