@@ -763,16 +763,48 @@ function UI:ApplyDockLayout()
 end
 
 function UI:UpdateDockVisibility()
-  if not state.docked then return end
+  if not state.docked then return false end
   local psf = PlayerSpellsFrame
   local tf = psf and psf.TalentsFrame
   local show = psf and psf:IsShown() and tf and tf:IsShown()
+  -- ApplyButton shown == the Talents tab is the fully-laid-out active tab. On a
+  -- COLD first open it lags a few frames behind the tab actually showing —
+  -- exactly the transient ScheduleDockRecheck() polls across.
   if show and tf.ApplyButton and not tf.ApplyButton:IsShown() then show = false end
+  GBB.dbg(("dock vis: psf=%s tf=%s apply=%s -> %s"):format(
+    tostring(psf and psf:IsShown()), tostring(tf and tf:IsShown()),
+    tostring(tf and tf.ApplyButton and tf.ApplyButton:IsShown()), tostring(show and true or false)))
   if show then
     ensureFrame(); self:ApplyDockLayout(); frame:Show(); self:Render()
+    return true
   elseif frame then
     frame:Hide()
   end
+  return false
+end
+
+-- The FIRST Talents open of a session loads Blizzard_PlayerSpells on demand; at
+-- the instant our OnShow / SetShown / TabSet hooks fire, its TalentsFrame and
+-- ApplyButton aren't shown yet, so a single synchronous UpdateDockVisibility
+-- computes "not visible" and the docked panel stays blank until you close and
+-- reopen. Re-check on a short bounded poll that stops the moment the panel
+-- shows (or the Talents window closes). A warm reopen passes the first check
+-- and never polls, so the already-working path is untouched.
+local recheckToken = 0
+function UI:ScheduleDockRecheck()
+  if not state.docked then return end
+  if self:UpdateDockVisibility() then return end
+  recheckToken = recheckToken + 1
+  local token, tries = recheckToken, 0
+  local function poll()
+    if token ~= recheckToken or not state.docked then return end -- superseded / undocked
+    local psf = PlayerSpellsFrame
+    if not (psf and psf:IsShown()) then return end               -- window closed → give up
+    if UI:UpdateDockVisibility() then return end                 -- panel shown → done
+    tries = tries + 1
+    if tries < 12 then C_Timer.After(0.05, poll) end             -- ~0.6s ceiling
+  end
+  C_Timer.After(0, poll)
 end
 
 local dockHooksInstalled = false
@@ -781,13 +813,13 @@ local function installDockHooks()
   if dockHooksInstalled then return true end
   local psf = PlayerSpellsFrame
   if not psf then return false end
-  psf:HookScript("OnShow", function() UI:UpdateDockVisibility() end)
+  psf:HookScript("OnShow", function() UI:ScheduleDockRecheck() end)
   psf:HookScript("OnHide", function() if frame and state.docked then frame:Hide() end end)
   if psf.TalentsFrame then
-    hooksecurefunc(psf.TalentsFrame, "SetShown", function() UI:UpdateDockVisibility() end)
+    hooksecurefunc(psf.TalentsFrame, "SetShown", function() UI:ScheduleDockRecheck() end)
   end
   if EventRegistry then
-    EventRegistry:RegisterCallback("PlayerSpellsFrame.TabSet", function() UI:UpdateDockVisibility() end)
+    EventRegistry:RegisterCallback("PlayerSpellsFrame.TabSet", function() UI:ScheduleDockRecheck() end)
   end
   -- We deliberately do NOT reposition the Talents window; the dock anchor is
   -- relative, so it follows wherever a frame-mover (MoveAny/BlizzMove) puts it.
@@ -803,7 +835,7 @@ function UI:EnsureDockHooks()
     dockWaiter:RegisterEvent("ADDON_LOADED")
     dockWaiter:SetScript("OnEvent", function(_, _, name)
       if name == "Blizzard_PlayerSpells" then
-        installDockHooks(); dockWaiter:UnregisterAllEvents(); UI:UpdateDockVisibility()
+        installDockHooks(); dockWaiter:UnregisterAllEvents(); UI:ScheduleDockRecheck()
       end
     end)
   end
@@ -818,7 +850,7 @@ function UI:SetDocked(docked)
   self:ApplyDockLayout()
   if docked then
     if frame then frame:Hide() end
-    self:UpdateDockVisibility()
+    self:ScheduleDockRecheck()
     if not (PlayerSpellsFrame and PlayerSpellsFrame:IsShown()) then
       GBB.msg("docked to your Talents window — open Talents (or /gbb) to see it.")
     end
@@ -829,7 +861,7 @@ end
 
 function UI:OnLogin()
   state.docked = (GBB.db and GBB.db.docked) and true or false
-  if state.docked then self:EnsureDockHooks(); self:UpdateDockVisibility() end
+  if state.docked then self:EnsureDockHooks(); self:ScheduleDockRecheck() end
 end
 
 -- ---------------------------------------------------------------------------
