@@ -397,10 +397,41 @@ end
 -- ---------------------------------------------------------------------------
 -- encounter strip
 -- ---------------------------------------------------------------------------
+--- Initials for an encounter with no bundled icon: "Nymrissa Wavecaller" -> "NW",
+--- "The Coiled Altar" -> "CA". A leading article is dropped because every third
+--- boss starts with one and "TCA"/"TTF"/"TLE" all read the same at a glance.
+local function initials(name)
+  if not name or name == "" then return "?" end
+  local out = ""
+  for word in tostring(name):gmatch("[%w']+") do
+    local lw = word:lower()
+    if lw ~= "the" and lw ~= "of" and lw ~= "a" then
+      out = out .. word:sub(1, 1):upper()
+      if #out >= 3 then break end
+    end
+  end
+  return out ~= "" and out or "?"
+end
+
 local function acquireEncButton(i)
   if encButtons[i] then return encButtons[i] end
   local b = CreateFrame("Button", nil, frame.strip)
   b:SetSize(ICON, ICON)
+
+  -- ⚠️ A MISSING ICON MUST NOT BE AN EMPTY BOX. Encounter art is bundled per
+  -- encounter id, so the first week of every new tier has data with no art —
+  -- and an empty box reads as "the addon is broken / not updated", which is
+  -- exactly how Season 2 was reported. This is LAYERED rather than detected:
+  -- WoW does not reliably report that a texture path failed to resolve (a bad
+  -- path draws nothing and still reads back as set), so instead the fallback
+  -- sits UNDERNEATH and the real icon covers it when it loads. Bundled icons
+  -- are opaque RGB, so a present icon hides this completely.
+  b.fallbackBg = b:CreateTexture(nil, "BACKGROUND")
+  b.fallbackBg:SetAllPoints(); b.fallbackBg:SetColorTexture(0.09, 0.08, 0.16, 1)
+  b.fallbackText = newText(b, GBB.FONT.label, 11, 0.78, 0.80, 0.88, "CENTER")
+  b.fallbackText:SetPoint("CENTER")
+  b.fallbackText:SetDrawLayer("BORDER")   -- above the fill, below the icon
+
   b.icon = b:CreateTexture(nil, "ARTWORK")
   b.icon:SetAllPoints(); b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
   b.edges = addEdges(b, 1, 1, 1, 1)
@@ -425,6 +456,7 @@ local function renderStrip()
     b:ClearAllPoints()
     b:SetPoint("TOPLEFT", col * PITCH, -row * PITCH)
     b.icon:SetTexture(encIconPath(e.id))
+    b.fallbackText:SetText(initials(e.name))
     b.edges:SetColor(acc.r, acc.g, acc.b, 1)
     b._name = e.name
     b._sub = (state.section == "mythicplus" and e.keyMin)
