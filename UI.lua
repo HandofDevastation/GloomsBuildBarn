@@ -124,6 +124,11 @@ local function makeOutlineButton(parent, w, h, cc, label, size)
   return b
 end
 
+-- Placeholder label width, used only until the font can actually be measured —
+-- see the measure() note below. Close enough to the real labels that a cold
+-- frame is not visibly misaligned for the frame or two before it corrects.
+local LABEL_W_GUESS = 44
+
 -- A binary switch: [leftLabel] [track+knob] [rightLabel]. value=false→left, true→right.
 -- colorFor(value) returns the accent colour for the SELECTED label.
 local function makeSwitch(parent, leftText, rightText, colorFor, onChange)
@@ -134,7 +139,7 @@ local function makeSwitch(parent, leftText, rightText, colorFor, onChange)
   s.left = CreateFrame("Button", nil, s)
   s.left.text = newText(s.left, GBB.FONT.label, 12, 1, 1, 1, "RIGHT")
   s.left.text:SetText(leftText); s.left.text:SetAllPoints()
-  s.left:SetSize(s.left.text:GetStringWidth() + 2, 16)
+  s.left:SetSize(LABEL_W_GUESS, 16)
   s.left:SetPoint("LEFT", 0, 0)
 
   s.track = CreateFrame("Button", nil, s)
@@ -149,10 +154,36 @@ local function makeSwitch(parent, leftText, rightText, colorFor, onChange)
   s.right = CreateFrame("Button", nil, s)
   s.right.text = newText(s.right, GBB.FONT.label, 12, 1, 1, 1, "LEFT")
   s.right.text:SetText(rightText); s.right.text:SetAllPoints()
-  s.right:SetSize(s.right.text:GetStringWidth() + 2, 16)
+  s.right:SetSize(LABEL_W_GUESS, 16)
   s.right:SetPoint("LEFT", s.track, "RIGHT", 10, 0)
 
+  -- ⚠️ MEASURE ON EVERY REFRESH, NEVER ONCE AT BUILD. On a COLD first open the
+  -- bundled TTF has not been laid out yet and GetStringWidth() returns 0. The
+  -- label button was sized to that, collapsed to 2px, and the label — which is
+  -- SetAllPoints to it — had no room to draw. That is the missing
+  -- "M+ / RAIDS / Heroic / Mythic" on the first docked open, and it was
+  -- PERMANENT because the width was computed once and never revisited.
+  --
+  -- The visible tell is positional, not just absent text: the track hangs ~45px
+  -- too far left, because everything after s.left is anchored off its width.
+  --
+  -- A zero measurement is DISCARDED rather than applied, so a cold frame keeps
+  -- the guess and looks approximately right until the real number arrives.
+  local measured = false
+  local function measure()
+    local lw, rw = s.left.text:GetStringWidth(), s.right.text:GetStringWidth()
+    if lw > 0 then s.left:SetSize(lw + 2, 16) end
+    if rw > 0 then s.right:SetSize(rw + 2, 16) end
+    if not measured and lw > 0 and rw > 0 then
+      measured = true
+      GBB.dbg(("switch measured: %q=%.1f %q=%.1f"):format(leftText, lw, rightText, rw))
+    end
+    return measured
+  end
+  s.Measured = function() return measured end
+
   local function refresh()
+    measure()
     local k = s.track.knob
     k:ClearAllPoints()
     if s.value then k:SetPoint("RIGHT", -3, 0) else k:SetPoint("LEFT", 3, 0) end
@@ -392,6 +423,30 @@ local function buildFrame()
   frame.logo:SetPoint("CENTER", frame, "TOP", 0, -430)
   frame.footer = newText(frame, GBB.FONT.body, 11, 0.55, 0.58, 0.66, "CENTER")
   frame.footer:SetPoint("BOTTOM", 0, 18); frame.footer:SetWidth(CONTENT_W)
+
+  -- ⚠️ ONE DEFERRED RE-RENDER ON EVERY SHOW. Everything drawn from Render() —
+  -- the strip header, the footer, the switch labels, the dock button's caption —
+  -- is written into a frame that, on a COLD first open, is still settling: the
+  -- docked path builds, lays out, shows and renders inside one tick, while
+  -- Blizzard_PlayerSpells is itself still loading. Text written into that window
+  -- did not appear until the panel was closed and reopened.
+  --
+  -- Re-rendering one tick later is the cheap general answer, and it is safe
+  -- because Render() is idempotent — it recomputes from `state` and writes the
+  -- same values a warm open would. It is NOT a diagnosis: the switch-label
+  -- collapse below has a confirmed cause, this covers the rest of the class
+  -- without pretending to know which region will be affected next.
+  frame:HookScript("OnShow", function(self)
+    if self._reRenderPending then return end
+    self._reRenderPending = true
+    C_Timer.After(0, function()
+      self._reRenderPending = false
+      if self:IsShown() then
+        GBB.dbg("deferred re-render on show")
+        UI:Render()
+      end
+    end)
+  end)
 end
 
 -- ---------------------------------------------------------------------------

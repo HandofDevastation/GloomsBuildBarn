@@ -1276,7 +1276,9 @@ SlashCmdList["GLOOMSBUILDBARN"] = function(arg)
     printStatus()
   elseif arg == "debug" then
     GBB.debug = not GBB.debug
-    print(PREFIX.." debug "..(GBB.debug and "|cff40ff40on|r" or "|cffff4444off|r"))
+    if GBB.db then GBB.db.debug = GBB.debug end   -- persists across reloads, on purpose
+    print(PREFIX.." debug "..(GBB.debug and "|cff40ff40on|r" or "|cffff4444off|r")
+      .." (persists across reloads)")
   elseif arg == "minimap" then
     local shown = GBB.ToggleMinimapButton and GBB:ToggleMinimapButton()
     print(PREFIX.." minimap button "..(shown and "|cff40ff40shown|r" or "|cffff4444hidden|r"))
@@ -1333,6 +1335,12 @@ f:SetScript("OnEvent", function(_, event, unit)
   if event == "PLAYER_LOGIN" then
     GloomsBuildBarnDB = GloomsBuildBarnDB or {}
     GBB.db = GloomsBuildBarnDB
+    -- ⚠️ DEBUG MUST SURVIVE A RELOAD. It used to be a plain local reset to false
+    -- at load, which made a COLD-OPEN bug impossible to instrument: by the time
+    -- you can type /gbb debug, the first open has already happened and the
+    -- evidence is gone. That is exactly the shape of the docked first-open
+    -- blank-text report, so the flag is persisted.
+    GBB.debug = GBB.db.debug and true or false
     print(PREFIX.." loaded. Type |cffffd200/gbb|r to open.")
     if GBB.UI and GBB.UI.OnLogin then GBB.UI:OnLogin() end
     if GBB.InitMinimapButton then GBB:InitMinimapButton() end
