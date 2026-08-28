@@ -10,6 +10,30 @@ on:
 permissions:
   contents: write
 
+# ── PUBLISHING CREDENTIALS, AT JOB LEVEL ─────────────────────────────────────
+# Job level, not on the step, because that is what the packager's own documented
+# example workflow does — and because it is a COMPOSITE action, where step-level
+# env reaching the inner steps is unreliable. The Loot Advisor lost its first
+# CurseForge upload to exactly that (Session 250).
+#
+# ⚠️ A MISSING TOKEN IS SILENT BY DESIGN. The packager treats "no token" as
+# "do not publish there": no error, no warning, exit 0. So a release that
+# uploaded nowhere looks identical to one that worked, which is why the check
+# below exists.
+#
+# WHY CURSEFORGE AT ALL, given this addon has shipped from GitHub Releases since
+# June: WoWUp's GitHub provider is broken for UPDATES (WowUp.CF issues #103 and
+# #107 — it fetches the API asset URL without the octet-stream header and unzips
+# GitHub's JSON metadata), open since February with the fix written but
+# unshipped. Installing works; updating does not. The only per-user workaround
+# is a GitHub personal access token, which is not something to ask of raiders.
+env:
+  GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+  # Both names from the one secret: release.sh checks CF_API_KEY first and
+  # CF_API_TOKEN second, and the documented example uses CF_API_KEY.
+  CF_API_KEY: ${{ secrets.CF_API_TOKEN }}
+  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -19,9 +43,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Says out loud whether each credential arrived, without printing any of
+      # them. What was missing before was any statement that one was absent.
+      - name: Check publishing credentials
+        run: |
+          if [ -n "$CF_API_TOKEN" ]; then
+            echo "CurseForge token: present (${#CF_API_TOKEN} chars)"
+          else
+            echo "::warning::CurseForge token MISSING — publishing to GitHub only,"\
+                 "and the packager will not say so. Check the CF_API_TOKEN secret."
+          fi
+          if [ -n "$GITHUB_OAUTH" ]; then
+            echo "GitHub token: present"
+          else
+            echo "::error::GitHub token missing — no release will be created."
+          fi
+
       - name: Package and create GitHub release
         uses: BigWigsMods/packager@v2
-        env:
-          # Only the built-in token — no CurseForge/Wago/WowInterface secrets,
-          # so the packager publishes a GitHub Release and nothing else.
-          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}

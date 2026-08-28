@@ -16,6 +16,20 @@ on:
 permissions:
   contents: write
 
+# ⚠️ THIS IS THE WORKFLOW THAT ACTUALLY SHIPS MOST RELEASES, so the publishing
+# credentials have to be here too — release.yml alone is not enough. At JOB
+# level, per the packager's documented example: it is a composite action and
+# step-level env reaching its inner steps is unreliable, which is how the Loot
+# Advisor's first CurseForge upload was silently lost (Session 250).
+#
+# A MISSING TOKEN IS SILENT: the packager treats it as "do not publish there"
+# and exits 0, so a Tuesday that published nowhere would look exactly like one
+# that worked. The credential check below is what makes that visible.
+env:
+  GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+  CF_API_KEY: ${{ secrets.CF_API_TOKEN }}
+  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
 concurrency:
   group: weekly-data
   cancel-in-progress: false
@@ -75,8 +89,21 @@ jobs:
           git push origin HEAD:main
           git push origin "$TAG"
 
+      - name: Check publishing credentials
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          if [ -n "$CF_API_TOKEN" ]; then
+            echo "CurseForge token: present (${#CF_API_TOKEN} chars)"
+          else
+            echo "::warning::CurseForge token MISSING — this week's release will"\
+                 "publish to GitHub only, and the packager will not say so."
+          fi
+          if [ -n "$GITHUB_OAUTH" ]; then
+            echo "GitHub token: present"
+          else
+            echo "::error::GitHub token missing — no release will be created."
+          fi
+
       - name: Package and publish the release
         if: steps.diff.outputs.changed == 'true'
         uses: BigWigsMods/packager@v2
-        env:
-          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
