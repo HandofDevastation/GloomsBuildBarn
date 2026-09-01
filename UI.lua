@@ -659,7 +659,9 @@ local function renderDetail(rows)
         parts[#parts + 1] = "Hero tree: " .. heroChange.from .. " -> " .. heroChange.to
       end
       for _, n in ipairs(names or {}) do parts[#parts + 1] = n end
-      if #parts == 0 then blk._nodes = nil; blk:Hide(); return below end
+      -- _pending goes with it: the deferred repaint below must never rewrite a
+      -- string belonging to a build that is no longer on screen.
+      if #parts == 0 then blk._nodes, blk._pending = nil, nil; blk:Hide(); return below end
 
       -- ⚠️ SHOWN BEFORE IT IS WRITTEN INTO, NOT AFTER. This block is HIDDEN by
       -- the branch above whenever a render finds no differences — which is what
@@ -674,8 +676,8 @@ local function renderDetail(rows)
       blk:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, -8)
       blk:Show()
 
-      setTextForce(blk.text,
-        "|cff" .. hex(blk._tag) .. prefix .. "|r " .. table.concat(parts, ", "))
+      blk._pending = "|cff" .. hex(blk._tag) .. prefix .. "|r " .. table.concat(parts, ", ")
+      setTextForce(blk.text, blk._pending)
       blk.text:SetWidth(CONTENT_W - 20)
       -- Measured AFTER the write and with the frame up, so the height comes
       -- from a string the client has actually laid out.
@@ -686,6 +688,39 @@ local function renderDetail(rows)
     below = fill(d.added, "ADDED:", diff.added, diff.addedNodes, true, diff.heroChange)
     below = fill(d.removed, "REMOVED:", diff.removed, diff.removedNodes)
     below = fill(d.changed, "CHANGED:", diff.changed, diff.changedNodes)
+
+    -- ⚠️ AND WRITTEN AGAIN ONE TICK LATER, BECAUSE SHOWING A FRAME AND WRITING
+    -- INTO IT IN THE SAME PASS IS NOT ENOUGH. Showing the block before writing
+    -- fixed the FIRST block and left the other two blank, and the difference
+    -- between them is what they hang off: ADDED anchors to the heading, which
+    -- has been on screen since the panel was built, while REMOVED and CHANGED
+    -- anchor to a frame shown moments earlier in this same pass. Their text is
+    -- measured correctly — the blank blocks come out the right HEIGHT for the
+    -- string they were handed — so the string is laid out and simply not
+    -- painted.
+    --
+    -- I cannot observe why from here, so this does not try to explain it: it
+    -- repeats the write on the next frame, which is the state we KNOW paints,
+    -- because it is the state a boss switch produces (blocks already up from a
+    -- previous render, then rewritten). setTextForce is what makes the repeat
+    -- count — the panel already re-rendered a tick after being shown, and that
+    -- could never help while it was writing the identical string.
+    --
+    -- One timer per render, dropped if the selection moved on underneath it.
+    if not d._blockRepaintPending then
+      d._blockRepaintPending = true
+      C_Timer.After(0, function()
+        d._blockRepaintPending = false
+        if not (frame and frame:IsShown() and d:IsShown()) then return end
+        for _, blk in ipairs({ d.added, d.removed, d.changed }) do
+          if blk:IsShown() and blk._pending then
+            setTextForce(blk.text, blk._pending)
+            blk.text:SetWidth(CONTENT_W - 20)
+            blk:SetHeight(blk.text:GetStringHeight() + 16)
+          end
+        end
+      end)
+    end
   end
 end
 

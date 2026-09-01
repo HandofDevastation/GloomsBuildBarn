@@ -1,5 +1,12 @@
 # Gloom's Build Barn
 
+## v2026.09.01.2
+
+- Fixed (properly, this time): the "Changes If Applied" list still came up
+  part-empty on the first open after starting the game — the ADDED line
+  appeared while REMOVED and CHANGED stayed blank. All three lines are now
+  written again on the following frame, which is what makes them appear.
+
 ## v2026.09.01.1
 
 - Fixed: the "Changes If Applied" list could come up empty the first time the
