@@ -1,3 +1,12 @@
+# ⚠️ THE CHANGELOG IS CURATED, NOT GENERATED. Without manual-changelog the
+# packager builds release notes from the FULL COMMIT BODIES between tags and
+# publishes them to GitHub AND CurseForge. This repo is public and its commit
+# messages are internal engineering notes — they name people, narrate mistakes,
+# and carry Co-Authored-By trailers. All of that reached the public store page.
+#
+# CHANGELOG.md is user-facing. Write it for someone deciding whether to update.
+manual-changelog: CHANGELOG.md
+
 # BigWigs packager config. We publish to GitHub Releases ONLY (no CurseForge/Wago).
 # WoWUp installs + auto-updates from those releases via the repo URL.
 
