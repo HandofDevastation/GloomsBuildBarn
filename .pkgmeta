@@ -7,8 +7,10 @@
 # CHANGELOG.md is user-facing. Write it for someone deciding whether to update.
 manual-changelog: CHANGELOG.md
 
-# BigWigs packager config. We publish to GitHub Releases ONLY (no CurseForge/Wago).
-# WoWUp installs + auto-updates from those releases via the repo URL.
+# BigWigs packager config. Releases go to GitHub AND to CurseForge project
+# 1671911 (see the X-Curse-Project-ID note in the .toc). CurseForge is the one
+# that matters for updates: WoWUp can INSTALL from a GitHub release but cannot
+# UPDATE from one, so a GitHub-only release reaches nobody who already has it.
 
 package-as: GloomsBuildBarn
 

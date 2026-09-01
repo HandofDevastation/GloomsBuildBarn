@@ -70,6 +70,23 @@ local function setFont(fs, path, size, flags)
   if not fs:SetFont(path, size, flags or "") then fs:SetFont(DEFAULT_FONT, size, flags or "") end
 end
 
+--- Write a string and GUARANTEE it is repainted.
+---
+--- ⚠️ HANDING A FONTSTRING THE VALUE IT ALREADY HOLDS DOES NOT REDRAW IT, so a
+--- string whose FIRST paint did not take stays blank for the rest of the
+--- session — it never changes, so nothing ever repaints it. That is the oldest
+--- recurring complaint about both of this project's addons ("it only shows up
+--- after I close and reopen, or switch boss"), and it is why the deferred
+--- re-render on show could never rescue this section: the re-render writes the
+--- SAME text one tick later and the client treats it as a no-op.
+---
+--- Writing an empty string first is what makes the second write a CHANGE.
+local function setTextForce(fs, s)
+  if not fs then return end
+  fs:SetText("")
+  fs:SetText(s or "")
+end
+
 local function newText(parent, font, size, r, g, b, justify)
   local fs = parent:CreateFontString(nil, "OVERLAY")
   setFont(fs, font, size)
@@ -551,12 +568,16 @@ end
 -- ---------------------------------------------------------------------------
 local function layoutDetailLine(d, i, anchorTo, labelText, valueText)
   local row = d.lines[i]
+  -- SHOWN BEFORE WRITTEN INTO, and written through a forced repaint — the same
+  -- rule as the change blocks below. These lines carry the build's identity
+  -- (hero tree, agreement, similarity), and an identity field is exactly the
+  -- kind that can hold the same string across two renders and so never repaint.
   row.label:ClearAllPoints(); row.value:ClearAllPoints()
   row.label:SetPoint("TOPLEFT", anchorTo, "BOTTOMLEFT", 0, -6)
-  row.label:SetText(labelText)
   row.value:SetPoint("LEFT", row.label, "RIGHT", 4, 0)
-  row.value:SetText(valueText)
   row.label:Show(); row.value:Show()
+  setTextForce(row.label, labelText)
+  setTextForce(row.value, valueText)
   return row.label
 end
 
@@ -639,12 +660,26 @@ local function renderDetail(rows)
       end
       for _, n in ipairs(names or {}) do parts[#parts + 1] = n end
       if #parts == 0 then blk._nodes = nil; blk:Hide(); return below end
-      blk.text:SetText("|cff" .. hex(blk._tag) .. prefix .. "|r " .. table.concat(parts, ", "))
-      blk.text:SetWidth(CONTENT_W - 20)
+
+      -- ⚠️ SHOWN BEFORE IT IS WRITTEN INTO, NOT AFTER. This block is HIDDEN by
+      -- the branch above whenever a render finds no differences — which is what
+      -- the FIRST render after a cold client start does, because the player's
+      -- live build is not readable yet. The deferred re-render a tick later then
+      -- computed the real diff and wrote it into a hidden frame, showed the
+      -- frame at the END, and the first paint did not take. Nothing changed the
+      -- string afterwards, so it stayed blank until a boss switch rewrote it.
+      -- The row backgrounds painted throughout, which is why it read as a
+      -- half-drawn panel rather than as a fault.
       blk:ClearAllPoints()
       blk:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, -8)
-      blk:SetHeight(blk.text:GetStringHeight() + 16)
       blk:Show()
+
+      setTextForce(blk.text,
+        "|cff" .. hex(blk._tag) .. prefix .. "|r " .. table.concat(parts, ", "))
+      blk.text:SetWidth(CONTENT_W - 20)
+      -- Measured AFTER the write and with the frame up, so the height comes
+      -- from a string the client has actually laid out.
+      blk:SetHeight(blk.text:GetStringHeight() + 16)
       return blk
     end
     -- "added" carries a hero-tree swap line if present. Order mirrors the mock.
@@ -789,15 +824,16 @@ function UI:Render()
     local selHere = state.selSpec == spec.name
     if sameBuild or not (row.perf and row.pop) then
       local key = row.perf and "perf" or "pop"
-      r.best:SetText("VIEW"); r.best:Show()
+      r.best:Show(); setTextForce(r.best.text, "VIEW")
       r.best:SetScript("OnClick", function() UI:Select(spec.name, key) end)
       r.best:SetActive(selHere)
       r.pop:Hide()
     else
-      r.best:SetText(specUnit(spec) == "hps" and "HIGHEST HPS" or "HIGHEST DPS"); r.best:Show()
+      r.best:Show()
+      setTextForce(r.best.text, specUnit(spec) == "hps" and "HIGHEST HPS" or "HIGHEST DPS")
       r.best:SetScript("OnClick", function() UI:Select(spec.name, "perf") end)
       r.best:SetActive(selHere and state.selBuild == "perf")
-      r.pop:SetText("POPULARITY"); r.pop:Show()
+      r.pop:Show(); setTextForce(r.pop.text, "POPULARITY")
       r.pop:SetScript("OnClick", function() UI:Select(spec.name, "pop") end)
       r.pop:SetActive(selHere and state.selBuild == "pop")
     end
