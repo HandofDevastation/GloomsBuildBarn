@@ -58,12 +58,11 @@ local function hex(cc) return cc.hex or ("%02x%02x%02x"):format(
   math.floor(cc.r * 255 + 0.5), math.floor(cc.g * 255 + 0.5), math.floor(cc.b * 255 + 0.5)) end
 
 local function className() return (UnitClass("player")) or "your class" end
-local function metricUnit(metric) return metric == "hps" and "hps" or "dps" end
--- Unit for a spec: healers = HPS, everyone else = DPS (role is the reliable tell).
-local function specUnit(spec)
-  if spec and (spec.role == "HEALER" or spec.metric == "hps") then return "hps" end
-  return "dps"
-end
+-- Unit for a spec: healers = HPS, everyone else = DPS. ONE definition, in
+-- Core.lua — this file used to carry its own copy of the rule plus a second
+-- metric-only variant, and three places deciding the same thing is how they
+-- start disagreeing.
+local function specUnit(spec) return GBB.UnitForSpec(spec) end
 
 -- Apply a bundled font with a graceful fallback to the default game font.
 local function setFont(fs, path, size, flags)
@@ -347,6 +346,14 @@ local function buildFrame()
   frame.topLine:SetPoint("TOPLEFT", INSET, -151)
   frame.topLine:SetWidth(CONTENT_W)
 
+  -- The rest of the class's specs on the SAME measurement as the headline, so
+  -- the comparison is one glance instead of a click per spec. Sits in the gap
+  -- that was already between the headline and the spec list, so nothing below
+  -- moves and no height has to be recomputed.
+  frame.peerLine = newText(frame, GBB.FONT.body, 11, 0.78, 0.80, 0.86)
+  frame.peerLine:SetPoint("TOPLEFT", INSET, -168)
+  frame.peerLine:SetWidth(CONTENT_W)
+
   -- talent heatmap toggle — bottom-pinned: label + subtitle + OFF/ON switch.
   frame.heatSub = newText(frame, GBB.FONT.body, 10, 0.78, 0.80, 0.86)
   frame.heatSub:SetPoint("BOTTOMLEFT", INSET, 18)
@@ -461,6 +468,8 @@ local function buildFrame()
       if self:IsShown() then
         GBB.dbg("deferred re-render on show")
         UI:Render()
+        -- Render() does not touch the dock button, so it needs saying separately.
+        UI:ApplyDockLabel()
       end
     end)
   end)
@@ -610,7 +619,10 @@ local function renderDetail(rows)
   -- detail lines (label + bold value)
   local anchor = d.title
   anchor = layoutDetailLine(d, 1, anchor,
-    ("Mean %s from %d top %sparses:"):format(unit:upper(), entry.samples or 0, diffWord),
+    -- MEDIAN, not mean — `median` is what the aggregator computes and emits, and
+    -- this line said "Mean" for the addon's whole life. The website has always
+    -- said median.
+    ("Median %s from %d top %sparses:"):format(unit:upper(), entry.samples or 0, diffWord),
     comma(entry.median) .. " " .. unit:upper())
   anchor = layoutDetailLine(d, 2, anchor, "Hero Tree:", hero or "—")
   anchor = layoutDetailLine(d, 3, anchor, "Build agreement:",
@@ -754,6 +766,7 @@ function UI:Render()
   frame.encTitle:SetShown(hasEnc)
   frame.backIcon:SetShown(hasEnc)
   frame.topLine:SetShown(hasEnc)
+  frame.peerLine:SetShown(hasEnc)
   frame.heatTitle:SetShown(hasEnc)
   frame.heatSub:SetShown(hasEnc)
   frame.heatSwitch:SetShown(hasEnc)
@@ -801,21 +814,52 @@ function UI:Render()
     GBB:ClearHeatmap()
   end
 
-  local rows, topDps = GBB:SpecRowsForEncounter(state.section, state.encId, state.diff)
+  -- `u` is the measurement THE PLAYER is judged on, not the class's best number:
+  -- a healer gets HPS and only HPS, and a tank gets DPS like any other non-healer
+  -- because nothing in the harvested data can rank one tank build against
+  -- another. GBB:ViewerUnit() owns that decision; both lines below follow it.
+  local rows, top, u = GBB:SpecRowsForEncounter(state.section, state.encId, state.diff)
   if #rows == 0 then
     frame.topLine:SetText("No builds for this " .. (isRaid and "boss" or "dungeon") .. " yet.")
+    setTextForce(frame.peerLine, "")
     frame.detail:Hide()
     for _, r in ipairs(specRows) do r:Hide() end
     return
   end
 
-  if topDps then
-    local e = topDps.perf or topDps.pop
-    local u = metricUnit(topDps.spec.metric)
+  if top then
+    local e = top.perf or top.pop
     frame.topLine:SetText(("Top %s for %s: |cff%s%s|r  |cffff7729•|r  %s %s"):format(
-      u:upper(), className(), hex(cc), topDps.spec.name, shortNum(e.median), u:upper()))
+      u:upper(), className(), hex(cc), top.spec.name, shortNum(e.median), u:upper()))
+
+    -- ⚠️ SAME MEASUREMENT AS THE HEADLINE, NEVER A MIXED LINE. A healer's HPS and
+    -- a DPS spec's DPS are different quantities, and putting them side by side
+    -- invites exactly the comparison that is not valid — a tank's damage most of
+    -- all, since it is real DPS and simply low. UnitForSpec() is the test rather
+    -- than spec.metric, because metric is nil for a spec with no builds yet and
+    -- would then read as "dps".
+    --
+    -- `rows` is still in throughput order here; the display re-sort below (your
+    -- spec first, then alphabetical) happens afterwards, so this line stays
+    -- ranked even though the list underneath it is not.
+    local peers = {}
+    for _, r in ipairs(rows) do
+      if r ~= top and GBB.UnitForSpec(r.spec) == u then
+        local pe = r.perf or r.pop
+        if pe and pe.median then
+          peers[#peers + 1] = ("|cff%s%s|r %s"):format(hex(cc), r.spec.name, shortNum(pe.median))
+        end
+      end
+    end
+    setTextForce(frame.peerLine, table.concat(peers, "  |cffff7729•|r  "))
   else
-    frame.topLine:SetText("")
+    -- Builds exist for this encounter, just none measured the way the player is
+    -- — a healer on a boss with no healing builds yet. SAY SO rather than leave
+    -- the headline blank: two of this addon's bugs have been blank text where
+    -- text was expected, and silence here would read as a third.
+    frame.topLine:SetText(("No %s builds for this %s yet."):format(
+      u == "hps" and "healing" or "damage", isRaid and "boss" or "dungeon"))
+    setTextForce(frame.peerLine, "")
   end
 
   -- valid selection?
@@ -908,7 +952,6 @@ function UI:ApplyDockLayout()
     frame:SetFrameStrata("HIGH")
     frame:SetMovable(false)
     frame.closeBtn:Hide()
-    frame.dockBtn.text:SetText("Undock")
   else
     frame:SetParent(UIParent)
     frame:ClearAllPoints()
@@ -916,8 +959,25 @@ function UI:ApplyDockLayout()
     frame:SetHeight(PANEL_H)
     frame:SetMovable(true)
     frame.closeBtn:Show()
-    frame.dockBtn.text:SetText("Dock")
   end
+  self:ApplyDockLabel()
+end
+
+-- ⚠️ THE DOCK LABEL IS THE ONE STRING ON THE PANEL THAT Render() DOES NOT WRITE,
+-- which is exactly why the deferred re-render on show did not cover it and it
+-- came up blank while everything else painted. Same class as the changes blocks:
+-- ApplyDockLayout is called from ensureFrame() immediately after buildFrame(),
+-- so on a cold DOCKED open the write lands on a frame that has never been
+-- visible, and nothing writes it again afterwards. A warm open works only
+-- because the second write hits an already-shown frame.
+--
+-- Kept OUT of ApplyDockLayout's two branches so there is one write site rather
+-- than two, and called again from the OnShow re-render once the frame has been
+-- up for a full frame. setTextForce is what makes the repeat count — rewriting
+-- the identical string is otherwise a no-op.
+function UI:ApplyDockLabel()
+  if not frame then return end
+  setTextForce(frame.dockBtn.text, state.docked and "Undock" or "Dock")
 end
 
 function UI:UpdateDockVisibility()

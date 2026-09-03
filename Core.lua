@@ -168,11 +168,38 @@ function GBB:EncounterList(section)
   return order
 end
 
+--- How a spec is measured: healers on HPS, everyone else on DPS. Falls back to
+--- role when `metric` is absent (a spec with no builds yet has no metric).
+function GBB.UnitForSpec(s)
+  if s and (s.role == "HEALER" or s.metric == "hps") then return "hps" end
+  return "dps"
+end
+
+--- The measurement the PLAYER is judged on, which is what the panel's headline
+--- and comparison line are keyed to.
+---
+--- ⚠️ TANKS COUNT AS DAMAGE, DELIBERATELY. There is no mitigation number in the
+--- harvested data that can rank one tank build against another, so a tank is
+--- ranked on damage like any other non-healer rather than shown nothing.
+---
+--- Healers get HPS and ONLY HPS: a healer must never be shown a damage figure
+--- for some other spec beside their own healing figure, because the two are not
+--- the same quantity and sitting them side by side invites the comparison.
+--- Defaults to "dps" before a spec is chosen.
+function GBB:ViewerUnit()
+  local idx = GetSpecialization and GetSpecialization()
+  if not idx then return "dps" end
+  local _, _, _, _, role = GetSpecializationInfo(idx)
+  return role == "HEALER" and "hps" or "dps"
+end
+
 -- For one encounter, the per-spec rows the UI shows, sorted by performance
 -- median (desc), highest first. Each row carries the spec meta plus the
 -- encounter's perf/pop entries for the requested difficulty.
 -- section "raid" uses diffKey (4|5); "mythicplus" ignores it.
--- Returns rows, topDpsRow (highest-median dps-metric row or nil).
+-- Returns rows, topRow, viewerUnit — where topRow is the highest-median row
+-- MEASURED THE SAME WAY THE PLAYER IS (see ViewerUnit), or nil if no spec of
+-- that kind has builds for this encounter.
 function GBB:SpecRowsForEncounter(section, encId, diffKey)
   local specs = self:ClassSpecList()
   local rows = {}
@@ -193,11 +220,12 @@ function GBB:SpecRowsForEncounter(section, encId, diffKey)
   end
   table.sort(rows, function(a, b) return a.sortMedian > b.sortMedian end)
 
-  local topDps
+  local unit = self:ViewerUnit()
+  local top
   for _, r in ipairs(rows) do
-    if r.spec.metric == "dps" then topDps = r; break end
+    if GBB.UnitForSpec(r.spec) == unit then top = r; break end
   end
-  return rows, topDps
+  return rows, top, unit
 end
 
 -- ---------------------------------------------------------------------------
@@ -553,7 +581,10 @@ local function acquireGlow()
   g.tex:SetAllPoints(g)
   g.ag = g:CreateAnimationGroup()
   local a = g.ag:CreateAnimation("Alpha")
-  a:SetFromAlpha(1.0); a:SetToAlpha(0.5); a:SetDuration(0.6); a:SetSmoothing("IN_OUT")
+  -- Pulse speed lives here. The loop is BOUNCE, so a FULL cycle is twice this
+  -- duration: 0.3 = a 0.6s pulse. Was 0.6 (a 1.2s pulse), which read as a slow
+  -- breath rather than something asking to be looked at. Lower = faster.
+  a:SetFromAlpha(1.0); a:SetToAlpha(0.5); a:SetDuration(0.3); a:SetSmoothing("IN_OUT")
   g.ag:SetLooping("BOUNCE")
   return g
 end
