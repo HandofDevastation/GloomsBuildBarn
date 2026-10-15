@@ -1,4 +1,4 @@
-## Interface: 120100
+## Interface: 120100, 120105
 ## Title: Gloom's Build Barn
 ## Notes: Top talent builds per boss, difficulty, and M+ dungeon — applied in one click. Harvested from Warcraft Logs.
 ## Author: Gloom

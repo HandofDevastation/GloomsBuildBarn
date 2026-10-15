@@ -1,5 +1,12 @@
 # Gloom's Build Barn
 
+## v2026.10.15
+
+**Up to date for patch 12.1.5**
+- The addon no longer shows as "Out of date" on the AddOns screen.
+- Kith'ix has its portrait ready. Its builds arrive with the next weekly update,
+  once a week of kills has been logged.
+
 ## v2026.09.02
 
 - Every spec's number at a glance: the line under the boss title now lists your
